@@ -18,7 +18,7 @@ QuickCD was a CD audio player bundled with Creative Labs Sound Blaster CD-ROM dr
 
 ## License
 
-This project is released as an educational and tribute reconstruction. See [LICENSE] for details.
+This project is released as an educational and tribute reconstruction. See [LICENSE](LICENSE) for details.
 
 ## Features
 
@@ -30,7 +30,7 @@ This project is released as an educational and tribute reconstruction. See [LICE
 
 ## Building
 
-See [BUILD.md] for full build instructions.
+See [BUILD.md](BUILD.md) for full build instructions.
 
 ## Testing
 
@@ -47,5 +47,6 @@ PLAYCD/
     windows/   - Windows 3.x dialog and MCI interface
   dlls/        - CTCCW.DLL and CTRES.DLL sources
   tools/       - Merge script for hybrid EXE generation
+  /        - Documentation
   test/        - DOSBox configuration
 ```
