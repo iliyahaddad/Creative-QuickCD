@@ -47,6 +47,6 @@ PLAYCD/
     windows/   - Windows 3.x dialog and MCI interface
   dlls/        - CTCCW.DLL and CTRES.DLL sources
   tools/       - Merge script for hybrid EXE generation
-  /        - Documentation
+  docs/        - Documentation
   test/        - DOSBox configuration
 ```
