@@ -15,6 +15,7 @@ typedef int BOOL;
 #define PASCAL pascal
 
 #define CDEVENT_DOS 1
+#define MAX_TRACKS 100
 
 typedef struct {
     WORD e_magic;
@@ -65,6 +66,7 @@ typedef struct {
     BOOL is_paused;
     char drive_letter;
     BYTE unit_number;
+    DWORD leadout_lba;
     CDROM_TOC_ENTRY toc[MAX_TRACKS];
 } PLAYER_STATE;
 
