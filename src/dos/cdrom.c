@@ -1,208 +1,414 @@
 #include "types.h"
 #include "cdrom.h"
-#include "dos.h"
-#include "string.h"
-#include "bios.h"
+#include <dos.h>
+#include <string.h>
 
-#pragma aux CheckMSCDEX = \
+#define MSCDEX_REQ_HEADER_SIZE 13
+#define MSCDEX_CMD_IOCTL_INPUT  3
+#define MSCDEX_CMD_IOCTL_OUTPUT 12
+#define MSCDEX_CMD_PLAY_AUDIO  132
+#define MSCDEX_CMD_STOP_AUDIO  133
+#define MSCDEX_CMD_RESUME_AUDIO 136
+
+#define MSCDEX_IOCTL_AUDIO_DISK_INFO 10
+#define MSCDEX_IOCTL_AUDIO_TRACK_INFO 11
+#define MSCDEX_IOCTL_AUDIO_Q_INFO 12
+#define MSCDEX_IOCTL_AUDIO_CHANNEL_INFO 4
+
+#define MSCDEX_IOCTL_EJECT 0
+#define MSCDEX_IOCTL_CLOSE_TRAY 5
+#define MSCDEX_IOCTL_AUDIO_CHANNEL_CONTROL 3
+
+#define MSCDEX_STATUS_ERROR 0x8000
+
+static BYTE g_drive_letters[MAX_DRIVES];
+static BYTE g_request[64];
+static BYTE g_control[32];
+static DWORD g_disc_end_lba;
+
+#pragma aux MscdexGetDriveCount = \
     "mov ax, 0x1500" \
+    "xor bx, bx" \
     "int 0x2F" \
-    "mov bl, al" \
-    "mov al, 0" \
-    "cmp bl, 0xFF" \
-    "jne L_not_found" \
-    "mov al, 1" \
-    "L_not_found:" \
+    "mov ax, bx" \
     parm [] \
-    value [al] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
+    value [ax] \
+    modify [bx] [cx] [dx] [si] [di];
 
-BOOL CheckMSCDEX(void) {
+WORD MscdexGetDriveCount(void)
+{
 }
 
-#pragma aux GetCDDriveCount = \
-    "mov ax, 0x150B" \
-    "int 0x2F" \
-    "mov al, bl" \
-    parm [] \
-    value [al] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
-
-BYTE GetCDDriveCount(void) {
-}
-
-#pragma aux GetCDDriveLetter = \
+#pragma aux MscdexGetDriveLetters = \
     "mov ax, 0x150D" \
     "int 0x2F" \
-    "mov al, dl" \
-    parm [bl] \
-    value [al] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
+    parm [es bx] \
+    modify [ax] [cx] [dx] [si] [di];
 
-BYTE GetCDDriveLetter(BYTE drive_index) {
+void MscdexGetDriveLetters(BYTE far *buffer)
+{
 }
 
-BYTE GetCDDriveUnit(BYTE drive_letter) {
-    BYTE count = GetCDDriveCount();
-    BYTE i;
-    for (i = 0; i < count; i++) {
-        if (GetCDDriveLetter(i) == drive_letter) {
-            return i;
-        }
-    }
-    return 0xFF;
-}
-
-#pragma aux Int2F_1502 = \
-    "mov ax, 0x1502" \
+#pragma aux MscdexDriveCheck = \
+    "mov ax, 0x150B" \
+    "mov bx, 0xADAD" \
     "int 0x2F" \
-    parm [cx] [dx] [es bx] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
+    "or ax, ax" \
+    "jz L_not_cd" \
+    "mov ax, 1" \
+    "jmp L_done" \
+    "L_not_cd:" \
+    "xor ax, ax" \
+    "L_done:" \
+    parm [cx] \
+    value [ax] \
+    modify [bx] [dx] [si] [di];
 
-void Int2F_1502(WORD cx, WORD dx, void far *buffer) {
+WORD MscdexDriveCheck(WORD drive_letter)
+{
 }
 
-BOOL ReadCDTOC(BYTE drive_unit, CDROM_TOC_ENTRY far *toc, BYTE far *track_count) {
-    BYTE header[8];
+#pragma aux MscdexSendRequest = \
+    "mov ax, 0x1510" \
+    "int 0x2F" \
+    parm [cx] [es bx] \
+    modify [ax] [bx] [cx] [dx] [si] [di];
+
+void MscdexSendRequest(WORD drive_letter, void far *request)
+{
+}
+
+static void SetFarPointer(BYTE far *dst, void far *src)
+{
+    WORD off = FP_OFF(src);
+    WORD seg = FP_SEG(src);
+
+    dst[0] = (BYTE)(off & 0xFF);
+    dst[1] = (BYTE)(off >> 8);
+    dst[2] = (BYTE)(seg & 0xFF);
+    dst[3] = (BYTE)(seg >> 8);
+}
+
+static WORD RequestStatus(void)
+{
+    return (WORD)g_request[3] | ((WORD)g_request[4] << 8);
+}
+
+static BOOL RequestSucceeded(void)
+{
+    return (RequestStatus() & MSCDEX_STATUS_ERROR) == 0;
+}
+
+static BOOL IoctlInput(WORD drive_letter, BYTE *control, WORD length)
+{
+    memset(g_request, 0, sizeof(g_request));
+
+    g_request[0] = (BYTE)(MSCDEX_REQ_HEADER_SIZE + 13);
+    g_request[2] = MSCDEX_CMD_IOCTL_INPUT;
+    SetFarPointer((BYTE far *)&g_request[14], (void far *)control);
+    g_request[18] = (BYTE)(length & 0xFF);
+    g_request[19] = (BYTE)(length >> 8);
+
+    MscdexSendRequest(drive_letter, (void far *)g_request);
+    return RequestSucceeded();
+}
+
+static BOOL IoctlOutput(WORD drive_letter, BYTE *control, WORD length)
+{
+    memset(g_request, 0, sizeof(g_request));
+
+    g_request[0] = (BYTE)(MSCDEX_REQ_HEADER_SIZE + 13);
+    g_request[2] = MSCDEX_CMD_IOCTL_OUTPUT;
+    SetFarPointer((BYTE far *)&g_request[14], (void far *)control);
+    g_request[18] = (BYTE)(length & 0xFF);
+    g_request[19] = (BYTE)(length >> 8);
+
+    MscdexSendRequest(drive_letter, (void far *)g_request);
+    return RequestSucceeded();
+}
+
+BOOL CheckMSCDEX(void)
+{
+    return MscdexGetDriveCount() != 0;
+}
+
+BYTE GetCDDriveCount(void)
+{
+    WORD count = MscdexGetDriveCount();
+
+    if (count > MAX_DRIVES)
+        count = MAX_DRIVES;
+
+    return (BYTE)count;
+}
+
+BYTE GetCDDriveLetter(BYTE drive_index)
+{
+    BYTE count = GetCDDriveCount();
+
+    if (drive_index >= count)
+        return 0;
+
+    memset(g_drive_letters, 0, sizeof(g_drive_letters));
+    MscdexGetDriveLetters((BYTE far *)g_drive_letters);
+
+    return (BYTE)('A' + g_drive_letters[drive_index]);
+}
+
+BYTE GetCDDriveUnit(BYTE drive_letter)
+{
+    WORD letter;
+
+    if (drive_letter >= 'a' && drive_letter <= 'z')
+        drive_letter = (BYTE)(drive_letter - 'a' + 'A');
+
+    if (drive_letter < 'A' || drive_letter > 'Z')
+        return 0xFF;
+
+    letter = (WORD)(drive_letter - 'A');
+
+    if (!MscdexDriveCheck(letter))
+        return 0xFF;
+
+    return (BYTE)letter;
+}
+
+static DWORD RedBookToLBA(DWORD address)
+{
+    BYTE frame = (BYTE)(address & 0xFF);
+    BYTE sec = (BYTE)((address >> 8) & 0xFF);
+    BYTE min = (BYTE)((address >> 16) & 0xFF);
+
+    return MSFtoLBA(min, sec, frame) - 150UL;
+}
+
+BOOL ReadCDTOC(BYTE drive_unit, CDROM_TOC_ENTRY far *toc,
+               BYTE far *track_count, DWORD far *leadout_lba)
+{
     BYTE first_track;
     BYTE last_track;
     BYTE i;
-    BYTE far *buf_far;
-    BYTE bcd_min;
-    BYTE bcd_sec;
-    BYTE bcd_frame;
-    WORD lba_word;
+    DWORD redbook;
+    DWORD lba;
 
-    buf_far = (BYTE far *)header;
-    Int2F_1502(0, drive_unit, buf_far);
-
-    first_track = header[0];
-    last_track = header[1];
-    if (last_track < first_track || last_track == 0) {
+    if (!toc || !track_count)
         return FALSE;
-    }
-    if (last_track - first_track + 1 > MAX_TRACKS) {
+
+    if (drive_unit == 0xFF)
         return FALSE;
-    }
 
-    *track_count = last_track - first_track + 1;
+    memset(g_control, 0, sizeof(g_control));
+    g_control[0] = MSCDEX_IOCTL_AUDIO_DISK_INFO;
 
-    for (i = 0; i < *track_count; i++) {
-        buf_far = (BYTE far *)&toc[i];
-        Int2F_1502(first_track + i, drive_unit, buf_far);
+    if (!IoctlInput((WORD)drive_unit, g_control, 7))
+        return FALSE;
 
-        toc[i].track_number = first_track + i;
-        bcd_min = ((BYTE far *)buf_far)[3];
-        bcd_sec = ((BYTE far *)buf_far)[4];
-        bcd_frame = ((BYTE far *)buf_far)[5];
+    first_track = g_control[1];
+    last_track = g_control[2];
 
-        toc[i].minutes = (bcd_min >> 4) * 10 + (bcd_min & 0x0F);
-        toc[i].seconds = (bcd_sec >> 4) * 10 + (bcd_sec & 0x0F);
-        toc[i].frames = (bcd_frame >> 4) * 10 + (bcd_frame & 0x0F);
+    if (first_track == 0 || last_track < first_track)
+        return FALSE;
 
-        lba_word = *((WORD far *)buf_far + 3);
-        toc[i].lba = lba_word;
+    if ((WORD)last_track - first_track + 1 > MAX_TRACKS)
+        return FALSE;
+
+    redbook = (DWORD)g_control[3]
+            | ((DWORD)g_control[4] << 8)
+            | ((DWORD)g_control[5] << 16)
+            | ((DWORD)g_control[6] << 24);
+
+    lba = RedBookToLBA(redbook);
+    g_disc_end_lba = lba;
+
+    if (leadout_lba)
+        *leadout_lba = lba;
+
+    *track_count = (BYTE)(last_track - first_track + 1);
+
+    for (i = 0; i < *track_count; ++i)
+    {
+        BYTE track = (BYTE)(first_track + i);
+
+        memset(g_control, 0, sizeof(g_control));
+        g_control[0] = MSCDEX_IOCTL_AUDIO_TRACK_INFO;
+        g_control[1] = track;
+
+        if (!IoctlInput((WORD)drive_unit, g_control, 7))
+            return FALSE;
+
+        redbook = (DWORD)g_control[2]
+                | ((DWORD)g_control[3] << 8)
+                | ((DWORD)g_control[4] << 16)
+                | ((DWORD)g_control[5] << 24);
+
+        lba = RedBookToLBA(redbook);
+
+        toc[i].track_number = track;
+        toc[i].lba = lba;
+
+        LBAtoMSF(lba, &toc[i].minutes,
+                 &toc[i].seconds,
+                 &toc[i].frames);
     }
 
     return TRUE;
 }
 
-#pragma aux PlayCDAudio = \
-    "mov ax, 0x1510" \
-    "int 0x2F" \
-    parm [bx] [cx dx] [si di] \
-    value [ax] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
+static BOOL SendSimpleRequest(WORD drive_letter, BYTE command)
+{
+    memset(g_request, 0, sizeof(g_request));
 
-BOOL PlayCDAudio(BYTE drive_unit, DWORD start_lba, DWORD end_lba) {
+    g_request[0] = MSCDEX_REQ_HEADER_SIZE;
+    g_request[2] = command;
+
+    MscdexSendRequest(drive_letter, (void far *)g_request);
+
+    return RequestSucceeded();
 }
 
-#pragma aux StopCDAudio = \
-    "mov ax, 0x1511" \
-    "int 0x2F" \
-    parm [bx] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
+BOOL PlayCDAudio(BYTE drive_unit, DWORD start_lba, DWORD end_lba)
+{
+    DWORD count;
 
-BOOL StopCDAudio(BYTE drive_unit) {
+    if (start_lba >= g_disc_end_lba)
+        return FALSE;
+
+    if (end_lba == 0xFFFFFFFFUL || end_lba > g_disc_end_lba)
+        end_lba = g_disc_end_lba;
+
+    if (end_lba <= start_lba)
+        return FALSE;
+
+    count = end_lba - start_lba;
+
+    memset(g_request, 0, sizeof(g_request));
+
+    g_request[0] = 22;
+    g_request[2] = MSCDEX_CMD_PLAY_AUDIO;
+
+    /* Addressing mode 0 = HSG/LBA. */
+    g_request[13] = 0;
+
+    g_request[14] = (BYTE)(start_lba & 0xFF);
+    g_request[15] = (BYTE)((start_lba >> 8) & 0xFF);
+    g_request[16] = (BYTE)((start_lba >> 16) & 0xFF);
+    g_request[17] = (BYTE)((start_lba >> 24) & 0xFF);
+
+    g_request[18] = (BYTE)(count & 0xFF);
+    g_request[19] = (BYTE)((count >> 8) & 0xFF);
+    g_request[20] = (BYTE)((count >> 16) & 0xFF);
+    g_request[21] = (BYTE)((count >> 24) & 0xFF);
+
+    MscdexSendRequest((WORD)drive_unit, (void far *)g_request);
+
+    return RequestSucceeded();
 }
 
-#pragma aux ResumeCDAudio = \
-    "mov ax, 0x1512" \
-    "int 0x2F" \
-    parm [bx] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
-
-BOOL ResumeCDAudio(BYTE drive_unit) {
+BOOL StopCDAudio(BYTE drive_unit)
+{
+    return SendSimpleRequest((WORD)drive_unit,
+                             MSCDEX_CMD_STOP_AUDIO);
 }
 
-#pragma aux EjectCD = \
-    "mov ax, 0x1513" \
-    "int 0x2F" \
-    parm [bx] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
-
-BOOL EjectCD(BYTE drive_unit) {
+BOOL ResumeCDAudio(BYTE drive_unit)
+{
+    return SendSimpleRequest((WORD)drive_unit,
+                             MSCDEX_CMD_RESUME_AUDIO);
 }
 
-#pragma aux CloseTray = \
-    "mov ax, 0x1514" \
-    "int 0x2F" \
-    parm [bx] \
-    modify [ax] [bx] [cx] [dx] [si] [di]
-
-BOOL CloseTray(BYTE drive_unit) {
+BOOL EjectCD(BYTE drive_unit)
+{
+    g_control[0] = MSCDEX_IOCTL_EJECT;
+    return IoctlOutput((WORD)drive_unit, g_control, 1);
 }
 
-BOOL GetVolume(BYTE drive_unit, BYTE far *left, BYTE far *right) {
-    #pragma aux GetVolume = \
-        "push bx" \
-        "push dx" \
-        "mov bl, al" \
-        "mov ax, 0x1515" \
-        "int 0x2F" \
-        "mov es:[bx], ch" \
-        "mov es:[dx], cl" \
-        "mov al, 0" \
-        "jnc L_ok" \
-        "mov al, 1" \
-        "L_ok:" \
-        "pop dx" \
-        "pop bx" \
-        parm [al] [es bx] [es dx] \
-        value [al] \
-        modify [ax] [bx] [cx] [dx] [si] [di];
+BOOL CloseTray(BYTE drive_unit)
+{
+    g_control[0] = MSCDEX_IOCTL_CLOSE_TRAY;
+    return IoctlOutput((WORD)drive_unit, g_control, 1);
 }
 
-BOOL SetVolume(BYTE drive_unit, BYTE left, BYTE right) {
-    #pragma aux SetVolume = \
-        "push bx" \
-        "mov bl, al" \
-        "mov ax, 0x1516" \
-        "mov ch, dl" \
-        "mov cl, dh" \
-        "int 0x2F" \
-        "mov al, 0" \
-        "jnc L_ok" \
-        "mov al, 1" \
-        "L_ok:" \
-        "pop bx" \
-        parm [al] [dl] [dh] \
-        value [al] \
-        modify [ax] [bx] [cx] [dx] [si] [di];
+BOOL GetVolume(BYTE drive_unit, BYTE far *left, BYTE far *right)
+{
+    if (!left || !right)
+        return FALSE;
+
+    memset(g_control, 0, sizeof(g_control));
+    g_control[0] = MSCDEX_IOCTL_AUDIO_CHANNEL_INFO;
+
+    if (!IoctlInput((WORD)drive_unit, g_control, 9))
+        return FALSE;
+
+    *left = g_control[2];
+    *right = g_control[4];
+
+    return TRUE;
 }
 
-void LBAtoMSF(DWORD lba, BYTE far *min, BYTE far *sec, BYTE far *frame) {
+BOOL SetVolume(BYTE drive_unit, BYTE left, BYTE right)
+{
+    memset(g_control, 0, sizeof(g_control));
+
+    g_control[0] = MSCDEX_IOCTL_AUDIO_CHANNEL_CONTROL;
+
+    g_control[1] = 0;
+    g_control[2] = left;
+
+    g_control[3] = 1;
+    g_control[4] = right;
+
+    g_control[5] = 2;
+    g_control[6] = 0;
+
+    g_control[7] = 3;
+    g_control[8] = 0;
+
+    return IoctlOutput((WORD)drive_unit, g_control, 9);
+}
+
+BOOL GetCDAudioPosition(BYTE drive_unit, BYTE far *track,
+                        BYTE far *min, BYTE far *sec,
+                        BYTE far *frame)
+{
+    if (!track || !min || !sec || !frame)
+        return FALSE;
+
+    memset(g_control, 0, sizeof(g_control));
+    g_control[0] = MSCDEX_IOCTL_AUDIO_Q_INFO;
+
+    if (!IoctlInput((WORD)drive_unit, g_control, 11))
+        return FALSE;
+
+    if ((g_control[1] & 0x0F) != 1)
+        return FALSE;
+
+    *track = g_control[2];
+    *min = g_control[4];
+    *sec = g_control[5];
+    *frame = g_control[6];
+
+    return TRUE;
+}
+
+void LBAtoMSF(DWORD lba, BYTE far *min,
+              BYTE far *sec, BYTE far *frame)
+{
     DWORD temp;
-    *min = (BYTE)((lba / (FRAMES_PER_SECOND * 60)) % 60);
+
+    if (!min || !sec || !frame)
+        return;
+
+    *min = (BYTE)(lba / (FRAMES_PER_SECOND * 60UL));
+
     temp = lba / FRAMES_PER_SECOND;
-    *sec = (BYTE)(temp % 60);
+    *sec = (BYTE)(temp % 60UL);
+
     *frame = (BYTE)(lba % FRAMES_PER_SECOND);
 }
 
-DWORD MSFtoLBA(BYTE min, BYTE sec, BYTE frame) {
-    DWORD lba;
-    lba = (DWORD)min * 60 * FRAMES_PER_SECOND;
-    lba += (DWORD)sec * FRAMES_PER_SECOND;
-    lba += frame;
-    return lba;
+DWORD MSFtoLBA(BYTE min, BYTE sec, BYTE frame)
+{
+    return (DWORD)min * 60UL * FRAMES_PER_SECOND
+         + (DWORD)sec * FRAMES_PER_SECOND
+         + frame;
 }
