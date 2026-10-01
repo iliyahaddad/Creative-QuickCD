@@ -1,7 +1,7 @@
 #ifndef WINDOWS_CDROM_H
 #define WINDOWS_CDROM_H
 
-#include "windows/types.h"
+#include "types.h"
 
 BOOL WinCD_Init(HWND hwnd);
 void WinCD_Cleanup(void);
