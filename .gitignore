@@ -1,0 +1,14 @@
+# build output
+/dos/
+/win/
+*.obj
+*.res
+*.err
+*.map
+*.lk1
+dlls/*.dll
+dos_part.exe
+win_part.exe
+quickcd.exe
+QCD.EXE
+__pycache__/

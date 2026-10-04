@@ -1,0 +1,48 @@
+#include <windows.h>
+#include "resource.h"
+
+IDD_MAIN_DIALOG DIALOG 0, 0, 320, 240
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "QuickCD Player"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LISTBOX IDC_TRACK_LIST, 7, 7, 150, 180, LBS_NOTIFY | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+
+    GROUPBOX "Time", IDC_STATIC, 165, 7, 148, 60
+    LTEXT "Current:", IDC_STATIC, 172, 20, 40, 12
+    LTEXT "00:00.00", IDC_TIME_CURRENT, 215, 20, 60, 12
+    LTEXT "Length:", IDC_STATIC, 172, 35, 40, 12
+    LTEXT "00:00.00", IDC_TIME_TOTAL, 215, 35, 60, 12
+    LTEXT "Track:", IDC_STATIC, 172, 50, 40, 12
+    LTEXT "1 / 1", IDC_TIME_TRACK, 215, 50, 60, 12
+
+    LTEXT "Ready", IDC_STATUS_TEXT, 7, 192, 306, 12
+
+    /* Windows 3.x has no trackbar control: a horizontal scroll bar is used. */
+    GROUPBOX "Volume", IDC_STATIC, 165, 72, 148, 40
+    SCROLLBAR IDC_VOLUME_SLIDER, 172, 85, 130, 10, SBS_HORZ | WS_TABSTOP
+    LTEXT "Volume: 100%", IDC_VOLUME_LABEL, 172, 98, 130, 12
+
+    PUSHBUTTON "About", IDM_ABOUT, 165, 120, 50, 16
+    PUSHBUTTON "Exit", IDC_BTN_CLOSE, 220, 120, 50, 16
+
+    DEFPUSHBUTTON "Play", IDC_BTN_PLAY, 7, 208, 45, 20
+    PUSHBUTTON "Stop", IDC_BTN_STOP, 57, 208, 45, 20
+    PUSHBUTTON "Pause", IDC_BTN_PAUSE, 107, 208, 45, 20
+    PUSHBUTTON "<<", IDC_BTN_PREV, 172, 208, 40, 20
+    PUSHBUTTON ">>", IDC_BTN_NEXT, 217, 208, 40, 20
+    PUSHBUTTON "Eject", IDC_BTN_EJECT, 262, 208, 50, 20
+END
+
+STRINGTABLE
+BEGIN
+    IDS_APPNAME        "QuickCD"
+    IDS_READY          "Ready"
+    IDS_PLAYING        "Playing"
+    IDS_PAUSED         "Paused"
+    IDS_STOPPED        "Stopped"
+    IDS_NODRIVE        "No CD-ROM drive detected"
+    IDS_NOTOC          "Unable to read CD Table of Contents"
+    IDS_MSCDEX_MISSING "MSCDEX not installed. Please load the CD-ROM driver (MSCDEX)."
+    IDS_ABOUT_TEXT     "Creative QuickCD\nOpen Source Reconstruction\n\nOriginal by Creative Technology\nDOS: PH Beh, Andy\nWindows: Nigel Tan"
+END
